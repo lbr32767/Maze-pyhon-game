@@ -3,6 +3,7 @@ import threading
 from UiComponents.SimpleButton import SimpleButton
 from UiComponents.TextInput import TextInput
 from UiComponents.Label import Label
+from UiComponents.FontManager import GetChineseFont
 from MazeGenerator import GenerateMaze
 
 # 游戏状态
@@ -15,7 +16,8 @@ GameState = {
     "PlayerY": 0,
     "CellSize": 20,
     "MoveTimer": 0,
-    "ShowSolution": False
+    "ShowSolution": False,
+    "LoadingProgress": 0.0
 }
 
 
@@ -47,6 +49,8 @@ def Render(Screen, StartBtn, SeedInput, WidthInput, HeightInput, WinTitle, BackB
     match GameState["State"]:
         case "NOSTART":
             DrawStartUi(Screen, StartBtn, SeedInput, WidthInput, HeightInput)
+        case "LOADING":
+            DrawLoadingUi(Screen)
         case "START":
             Screen.fill((0, 0, 0))
             DrawMaze(Screen)
@@ -72,6 +76,39 @@ def DrawStartUi(Screen, StartBtn, SeedInput, WidthInput, HeightInput):
     WidthInput.Draw(Screen)
     HeightInput.UpdatePosition(Screen)
     HeightInput.Draw(Screen)
+
+
+def DrawLoadingUi(Screen):
+    """绘制加载界面"""
+    Screen.fill((0, 0, 0))
+    Font = GetChineseFont(36)
+    TextSurface = Font.render("迷宫生成中...", True, (255, 255, 255))
+    Screen.blit(
+        TextSurface,
+        (
+            Screen.get_width() // 2 - TextSurface.get_width() // 2,
+            Screen.get_height() // 2 - TextSurface.get_height() // 2 - 40,
+        ),
+    )
+
+    Progress = GameState.get("LoadingProgress", 0.0)
+    BarWidth = 400
+    BarHeight = 20
+    BarX = Screen.get_width() // 2 - BarWidth // 2
+    BarY = Screen.get_height() // 2 + 10
+
+    pygame.draw.rect(Screen, (60, 60, 60), (BarX, BarY, BarWidth, BarHeight), border_radius=5)
+    if Progress > 0:
+        pygame.draw.rect(Screen, (0, 200, 100), (BarX, BarY, int(BarWidth * Progress), BarHeight), border_radius=5)
+
+    PercentText = Font.render(f"{int(Progress * 100)}%", True, (255, 255, 255))
+    Screen.blit(
+        PercentText,
+        (
+            Screen.get_width() // 2 - PercentText.get_width() // 2,
+            BarY + BarHeight + 10,
+        ),
+    )
 
 
 def DrawMaze(Screen):
@@ -153,14 +190,24 @@ def StartGame(SeedInput, WidthInput, HeightInput):
         Height = 5
     elif Height > 1000:
         Height = 1000
-    GameState["State"] = "START"
-    GameState["Maze"] = GenerateMaze(Width, Height, SeedInput.Text)
+
+    def OnProgress(Progress):
+        GameState["LoadingProgress"] = Progress
+
+    def GenerateMazeAsync():
+        Maze = GenerateMaze(Width, Height, SeedInput.Text, OnProgress=OnProgress)
+        GameState["Maze"] = Maze
+        GameState["State"] = "START"
+
+    GameState["State"] = "LOADING"
+    GameState["LoadingProgress"] = 0.0
     GameState["MazeWidth"] = Width
     GameState["MazeHeight"] = Height
     GameState["PlayerX"] = 0
     GameState["PlayerY"] = 0
     GameState["CellSize"] = 20
     GameState["MoveTimer"] = 0
+    threading.Thread(target=GenerateMazeAsync, daemon=True).start()
 
 def Main():
     print("Success Start of maze-python-game!")

@@ -2,7 +2,7 @@ import random
 from collections import deque
 
 
-def GenerateMaze(Width, Height, Seed=None):
+def GenerateMaze(Width, Height, Seed=None, OnProgress=None):
     """
     基于种子生成指定大小的迷宫点阵，并标注解法路径。
 
@@ -10,6 +10,7 @@ def GenerateMaze(Width, Height, Seed=None):
         Width: 迷宫横向单元格数
         Height: 迷宫纵向单元格数
         Seed: 随机种子（字符串或数字）
+        OnProgress: 进度回调，接收 0.0 ~ 1.0
 
     返回:
         二维列表 (2*Height+1) x (2*Width+1)，其中:
@@ -27,8 +28,10 @@ def GenerateMaze(Width, Height, Seed=None):
     # 迭代回溯生成迷宫（显式栈，避免递归深度限制）
     Stack = [(0, 0)]
     Visited[0][0] = True
+    VisitedCount = 1
     Grid[1][1] = 0
     Directions = [(0, -1), (1, 0), (0, 1), (-1, 0)]
+    TotalCells = Width * Height
 
     while Stack:
         CellX, CellY = Stack[-1]
@@ -41,6 +44,9 @@ def GenerateMaze(Width, Height, Seed=None):
         if Neighbors:
             DeltaX, DeltaY, NextX, NextY = random.choice(Neighbors)
             Visited[NextY][NextX] = True
+            VisitedCount += 1
+            if OnProgress and VisitedCount % 10 == 0:
+                OnProgress(0.7 * VisitedCount / TotalCells)
             Grid[2 * CellY + 1 + DeltaY][2 * CellX + 1 + DeltaX] = 0
             Grid[2 * NextY + 1][2 * NextX + 1] = 0
             Stack.append((NextX, NextY))
@@ -53,6 +59,7 @@ def GenerateMaze(Width, Height, Seed=None):
 
     Queue = deque([(Start, [Start])])
     Seen = {Start}
+    SeenCount = 1
     SolutionPath = []
 
     while Queue:
@@ -68,6 +75,9 @@ def GenerateMaze(Width, Height, Seed=None):
                 WallX = 2 * CurrentX + 1 + DeltaX
                 if Grid[WallY][WallX] == 0 and (NextX, NextY) not in Seen:
                     Seen.add((NextX, NextY))
+                    SeenCount += 1
+                    if OnProgress and SeenCount % 10 == 0:
+                        OnProgress(0.7 + 0.3 * SeenCount / TotalCells)
                     Queue.append(((NextX, NextY), Path + [(NextX, NextY)]))
 
     # 在网格上标记解法路径（包含单元格本身及单元格之间的通道）
@@ -81,5 +91,8 @@ def GenerateMaze(Width, Height, Seed=None):
     # 入口与出口也算作解法路径的一部分
     Grid[0][1] = 2
     Grid[2 * Height][2 * Width - 1] = 2
+
+    if OnProgress:
+        OnProgress(1.0)
 
     return Grid
