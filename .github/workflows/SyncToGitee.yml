@@ -1,0 +1,113 @@
+name: SyncToGitee
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  SyncRepository:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: PushToGitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          git remote add gitee https://${{ github.repository_owner }}:${GITEE_TOKEN}@gitee.com/${{ github.repository }}.git
+          git push gitee --all --force
+          git push gitee --tags --force
+
+  SyncReleases:
+    runs-on: ubuntu-latest
+    needs: SyncRepository
+    steps:
+      - name: SyncReleasesToGitee
+        run: |
+          #!/bin/bash
+          set -e
+
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name }}"
+          GITEE_TOKEN="${{ secrets.GITEE_TOKEN }}"
+          GH_TOKEN="${{ secrets.GITHUB_TOKEN }}"
+
+          echo "Fetching GitHub releases..."
+          gh_releases=$(curl -s -H "Authorization: token ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${OWNER}/${REPO}/releases")
+
+          echo "Fetching Gitee releases..."
+          gitee_releases=$(curl -s -H "Accept: application/json" \
+            "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases")
+
+          echo "$gh_releases" | jq -c '.[]' | while read -r release; do
+            tag_name=$(echo "$release" | jq -r '.tag_name')
+            name=$(echo "$release" | jq -r '.name')
+            body=$(echo "$release" | jq -r '.body // ""')
+            target_commitish=$(echo "$release" | jq -r '.target_commitish')
+            prerelease=$(echo "$release" | jq -r '.prerelease')
+            draft=$(echo "$release" | jq -r '.draft')
+
+            if [ "$draft" == "true" ]; then
+              echo "Skipping draft release ${tag_name}"
+              continue
+            fi
+
+            exists=$(echo "$gitee_releases" | jq -r --arg tag "$tag_name" '.[] | select(.tag_name == $tag) | .tag_name')
+
+            if [ "$exists" == "$tag_name" ]; then
+              echo "Release ${tag_name} already exists on Gitee, skipping..."
+              continue
+            fi
+
+            echo "Creating release ${tag_name} on Gitee..."
+            create_response=$(curl -s -X POST \
+              -H "Accept: application/json" \
+              -H "Content-Type: application/json" \
+              "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases" \
+              -d "{
+                \"access_token\": \"${GITEE_TOKEN}\",
+                \"tag_name\": \"${tag_name}\",
+                \"name\": $(echo "$name" | jq -R -s '.'),
+                \"body\": $(echo "$body" | jq -R -s '.'),
+                \"target_commitish\": \"${target_commitish}\",
+                \"prerelease\": ${prerelease}
+              }")
+
+            release_id=$(echo "$create_response" | jq -r '.id // empty')
+            if [ -z "$release_id" ]; then
+              echo "Failed to create release ${tag_name}: ${create_response}"
+              continue
+            fi
+
+            echo "Release ${tag_name} created with id ${release_id}"
+
+            assets=$(echo "$release" | jq -c '.assets // [] | .[]')
+            if [ -z "$assets" ]; then
+              continue
+            fi
+
+            echo "$release" | jq -c '.assets // [] | .[]' | while read -r asset; do
+              asset_name=$(echo "$asset" | jq -r '.name')
+              browser_download_url=$(echo "$asset" | jq -r '.browser_download_url')
+
+              echo "Downloading asset ${asset_name}..."
+              curl -s -L -H "Authorization: token ${GH_TOKEN}" \
+                -o "/tmp/${asset_name}" \
+                "${browser_download_url}"
+
+              echo "Uploading asset ${asset_name} to Gitee..."
+              curl -s -X POST \
+                -H "Accept: application/json" \
+                "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/${release_id}/attach_files" \
+                -F "access_token=${GITEE_TOKEN}" \
+                -F "file=@/tmp/${asset_name}"
+
+              rm -f "/tmp/${asset_name}"
+            done
+          done
