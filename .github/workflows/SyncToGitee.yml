@@ -37,12 +37,14 @@ jobs:
           GH_TOKEN="${{ secrets.GITHUB_TOKEN }}"
 
           echo "Fetching GitHub releases..."
-          gh_releases=$(curl -s -H "Authorization: token ${GH_TOKEN}" \
+          gh_releases=$(curl -s --connect-timeout 30 --max-time 60 \
+            -H "Authorization: token ${GH_TOKEN}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${OWNER}/${REPO}/releases")
 
           echo "Fetching Gitee releases..."
-          gitee_releases=$(curl -s -H "Accept: application/json" \
+          gitee_releases=$(curl -s --connect-timeout 30 --max-time 60 \
+            -H "Accept: application/json" \
             "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases")
 
           echo "$gh_releases" | jq -c '.[]' | while read -r release; do
@@ -66,7 +68,7 @@ jobs:
             fi
 
             echo "Creating release ${tag_name} on Gitee..."
-            create_response=$(curl -s -X POST \
+            create_response=$(curl -s -X POST --connect-timeout 30 --max-time 60 \
               -H "Accept: application/json" \
               -H "Content-Type: application/json" \
               "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases" \
@@ -97,12 +99,13 @@ jobs:
               browser_download_url=$(echo "$asset" | jq -r '.browser_download_url')
 
               echo "Downloading asset ${asset_name}..."
-              curl -s -L -H "Authorization: token ${GH_TOKEN}" \
+              curl -s -L --connect-timeout 30 --max-time 300 \
+                -H "Authorization: token ${GH_TOKEN}" \
                 -o "/tmp/${asset_name}" \
                 "${browser_download_url}"
 
               echo "Uploading asset ${asset_name} to Gitee..."
-              curl -s -X POST \
+              curl -s -X POST --connect-timeout 30 --max-time 300 \
                 -H "Accept: application/json" \
                 "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/${release_id}/attach_files" \
                 -F "access_token=${GITEE_TOKEN}" \
